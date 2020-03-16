@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="egovframework.example.bill.service.impl.BillMapper">
+    <!-- 이현희:6. sql xml 만들기(처음만들때 리스트가져오는 메서드 까지 같이 만듦) -->
+    
+	<!-- 경비관리 리스트 -->
+	<select id="getBillList" parameterType="billVO" resultType="egovMap">
+		SELECT ROW_NUMBER() OVER(ORDER BY A.USE_DT) AS NO
+		     , A.BILL_NUM
+		     , A.USE_DT 									-- 사용일 (YYYY-MM-DD) : 검색때문에 화면단에서 YYYY-MM-DD로 변경
+		     , A.DTL_CD  									-- 사용내역코드
+		     , CASE WHEN A.DTL_CD = 'NB' THEN '식대(야근)'
+		            WHEN A.DTL_CD = 'NT' THEN '택시비(야근)'
+		            WHEN A.DTL_CD = 'HT' THEN '택시비(회식)'
+		            WHEN A.DTL_CD = 'S' THEN '사무용품 구매'
+		            WHEN A.DTL_CD = 'G' THEN '교육비'
+		            WHEN A.DTL_CD = 'J' THEN '접대비'
+		            ELSE '-'								
+		        END AS DTL_NM   							-- 사용내역명
+		     , A.USE_AMT  									-- 사용금액
+		     , B.APPR_AMT                   				-- 승인금액
+		     , B.STATUS_CD 									-- 처리상태코드
+		     , CASE NVL(B.STATUS_CD, 'J') 					-- 경비등록했을 경우 기본값 '접수'
+		            WHEN 'J' THEN '접수'
+		            WHEN 'S' THEN '승인'
+		            WHEN 'O' THEN '지급완료'
+		            WHEN 'N' THEN '반려'
+		        END AS STATUS_NM 							-- 처리상태명
+		     , TO_CHAR(A.REG_DT, 'YYYY-MM-DD') AS REG_DT	-- 등록일 (YYYY-MM-DD)
+		  FROM TB_BILL A
+		  LEFT OUTER JOIN (SELECT SUB_B.BILL_NUM
+		                        , SUB_B.APPR_AMT
+		                        , SUB_B.STATUS_CD
+		                     FROM TB_PROG_DTL SUB_B
+		                    WHERE PROG_SEQ = (SELECT MAX(PROG_SEQ)
+		                                        FROM TB_PROG_DTL
+		                                       WHERE BILL_NUM = SUB_B.BILL_NUM)
+		                   ) B
+		    ON A.BILL_NUM = B.BILL_NUM
+		 WHERE 1=1
+		  <!-- 이현희:19 검색조건 -->
+		  <if test="searchYm != null and searchYm != ''">
+		    <!-- 등록연YYYY월MM -->
+		   AND TO_CHAR(REG_DT, 'YYYYMM') = #{searchYm, jdbcType=VARCHAR}
+		 </if>
+		 <if test="searchDtlCd != null and searchDtlCd !=''">
+		   <!-- 입력하는 값과 컬럼 비교 -->
+		   AND A.DTL_CD = #{searchDtlCd,jdbcType=VARCHAR}
+		 </if>
+		 <if test="searchStatusCd != null and searchStatusCd !=''">
+		   <!-- 처리상태코드가 없으면 기본값 '접수'인 것과 비교 -->
+		   AND NVL(B.STATUS_CD, 'J') = #{searchStatusCd,jdbcType=VARCHAR}
+		 </if>  
+		 <!-- 사용일 최신순으로 정렬 -->
+		 ORDER BY A.USE_DT DESC
+	</select>
+	
+	<!-- 이현희:13. 저장 쿼리 -->
+	<!-- 경비관리 리스트 -->
+	<insert id="billAdd" parameterType="BillVO">
+	    INSERT INTO TB_BILL (
+		     BILL_NUM
+		    ,USE_DT
+		    ,DTL_CD
+		    ,USE_AMT
+		    ,REG_DT
+		    ,FILE_NM
+		    ,FILE_PATH
+		) VALUES (
+			 <!-- 청구번호 +1부터 1씩 증가 -->
+		     (SELECT NVL(MAX(BILL_NUM), 0) + 1
+		        FROM TB_BILL)
+		    ,#{useDt,    jdbcType=VARCHAR}
+		    ,#{dtlCd,    jdbcType=VARCHAR}
+		    ,#{useAmt,   jdbcType=INTEGER}
+		    ,SYSDATE
+		    ,#{fileNm,   jdbcType=VARCHAR}
+		    ,#{filePath, jdbcType=VARCHAR}
+		)
+	</insert>
+	
+	<!-- 이현희:28 상세 쿼리 -->
+	<!-- 경비관리 리스트 -->
+	<select id="selectBillDtl" parameterType="billVO" resultType="egovMap">
+	    SELECT A.BILL_NUM
+		     , A.DTL_CD
+		     , A.USE_DT
+		     , A.USE_AMT
+		     , A.FILE_PATH
+		     , A.FILE_NM
+		     , B.STATUS_CD
+		     , CASE NVL(B.STATUS_CD, 'J') 					-- 경비등록했을 경우 기본값 '접수'
+		            WHEN 'J' THEN '접수'
+		            WHEN 'S' THEN '승인'
+		            WHEN 'O' THEN '지급완료'
+		            WHEN 'N' THEN '반려'
+		        END AS STATUS_NM 							-- 처리상태명
+		     , TO_CHAR(B.STATUS_DT, 'YYYYMMDD HH24:MI') AS STATUS_DT
+		     , B.APPR_AMT
+		     , B.NOTE
+		  FROM TB_BILL A
+		  LEFT OUTER JOIN (SELECT SUB_B.BILL_NUM
+		                        , SUB_B.STATUS_CD
+		                        , SUB_B.STATUS_DT
+		                        , SUB_B.APPR_AMT
+		                        , SUB_B.NOTE
+		                     FROM TB_PROG_DTL SUB_B
+		                    WHERE SUB_B.PROG_SEQ = (SELECT MAX(PROG_SEQ)
+		                                              FROM TB_PROG_DTL
+		                                             WHERE BILL_NUM = SUB_B.BILL_NUM)
+		                   ) B
+		    ON A.BILL_NUM = B.BILL_NUM
+		 WHERE A.BILL_NUM = #{billNum, jdbcType=VARCHAR}
+	</select>
+	
+	<!-- 이현희:36. 수정 쿼리 -->
+	<update id="billModify" parameterType="BillVO">
+	    UPDATE TB_BILL
+		   SET DTL_CD    = #{dtlCd,    jdbcType=VARCHAR}
+		     , USE_DT    = #{useDt,    jdbcType=VARCHAR}
+		     , USE_AMT   = #{useAmt,   jdbcType=INTEGER}
+		     <if test="fileNm != null and fileNm != '' ">
+			 , FILE_PATH = #{filePath, jdbcType=VARCHAR}
+		     , FILE_NM   = #{fileNm,   jdbcType=VARCHAR}		         
+		     </if>
+		 WHERE BILL_NUM  = #{billNum, jdbcType=VARCHAR}
+	</update>
+	
+	<!-- 이현희:45. 수정 쿼리 -->
+	<delete id="billRemove" parameterType="BillVO">
+	    DELETE
+		  FROM TB_BILL
+		 WHERE BILL_NUM = #{billNum, jdbcType=VARCHAR}
+	</delete>
+		    
+</mapper>
